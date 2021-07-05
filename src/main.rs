@@ -21,7 +21,7 @@ fn main() -> Result<(), main_error::MainError> {
     let arg = env::args().nth(1);
     let dir = arg
         .filter(|a| !a.is_empty())
-        .map(|a| PathBuf::from(a))
+        .map(PathBuf::from)
         .or_else(|| env::current_dir().ok())
         .unwrap();
 
