@@ -4,6 +4,12 @@ Edits the filenames of the current directory on the editor of your choice.
 
 ## Installation
 
+From crates.io:
+
+```shell
+$ cargo install quiren
+```
+
 From the git repository:
 
 ```shell
