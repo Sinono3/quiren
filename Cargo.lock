@@ -72,6 +72,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pico-args"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "db8bcd96cb740d03149cbad5518db9fd87126a10ab519c011893b1754134c468"
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -88,11 +94,12 @@ dependencies = [
 
 [[package]]
 name = "quiren"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "edit",
  "main_error",
  "osstrtools",
+ "pico-args",
  "thiserror",
 ]
 

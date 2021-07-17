@@ -4,12 +4,24 @@ Edits the filenames of the current directory on the editor of your choice.
 
 ## Installation
 
+From the git repository:
+
 ```shell
 $ git clone https://github.com/Sinono3/quiren.git
 $ cargo install --path quiren
 ```
 
 ## Usage
+
+```
+Usage: quiren [options] [dir]
+
+Options:
+    -h, --help      Prints help information
+    -r, --retry     Re-enters the editor after an error
+```
+
+Examples:
 
 ```shell
 # On the current directory

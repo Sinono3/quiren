@@ -2,8 +2,48 @@ use osstrtools::OsStrConcat;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+const HELP: &str = "\
+Usage: quiren [options] [dir]
+
+Options:
+    -h, --help      Prints help information
+    -r, --retry     Re-enters the editor after an error
+";
+
+fn main() -> Result<(), main_error::MainError> {
+    let mut pargs = pico_args::Arguments::from_env();
+
+    let help = pargs.contains(["-h", "--help"]) ;
+    let retry = pargs.contains(["-r", "--retry"]) ;
+
+    let dir: PathBuf = pargs
+        .free_from_str()
+        .or_else(|_| env::current_dir())
+        .unwrap();
+
+    if help {
+        print!("{}", HELP);
+        return Ok(());
+    }
+
+    if retry {
+        use std::io::Read;
+        let mut stdin = std::io::stdin();
+
+        while let Err(err) = quiren(&dir) {
+            eprintln!("Error: {}", err);
+            eprintln!("Press enter to retry");
+
+            let _ = stdin.read(&mut [0u8]);
+        }
+        return Ok(());
+    }
+
+    Ok(quiren(&dir)?)
+}
 
 #[derive(Error, Debug)]
 enum QuirenError {
@@ -17,21 +57,7 @@ enum QuirenError {
     IoError(#[from] std::io::Error),
 }
 
-fn main() -> Result<(), main_error::MainError> {
-    let arg = env::args().nth(1);
-    let dir = arg
-        .filter(|a| !a.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| env::current_dir().ok())
-        .unwrap();
-
-    // TODO: clap arguments
-    // TODO: add retry until correct option
-
-    Ok(quiren(dir)?)
-}
-
-fn quiren(dir: PathBuf) -> Result<(), QuirenError> {
+fn quiren(dir: &Path) -> Result<(), QuirenError> {
     let mut entries: Vec<_> = dir.read_dir()?.map(|e| e.unwrap()).collect();
 
     entries.sort_by_key(|e| e.file_name());
@@ -61,7 +87,7 @@ fn quiren(dir: PathBuf) -> Result<(), QuirenError> {
                 entries[i].file_name().to_string_lossy().to_string(),
             ));
         }
-        
+
         // Check for duplicates
         for (j, b) in edited.lines().enumerate() {
             if i != j && a == b {
@@ -79,7 +105,7 @@ fn quiren(dir: PathBuf) -> Result<(), QuirenError> {
             name != entries[*i].file_name()
         })
     {
-        let mut new_path = dir.clone();
+        let mut new_path = dir.to_owned();
         new_path.push(line);
         fs::rename(&entries[i].path(), new_path)?;
     }
