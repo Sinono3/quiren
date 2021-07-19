@@ -25,6 +25,7 @@ Usage: quiren [options] [dir]
 Options:
     -h, --help      Prints help information
     -r, --retry     Re-enters the editor after an error
+    -d, --delete    Delete files removed in the editor
 ```
 
 Examples:

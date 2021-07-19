@@ -11,13 +11,19 @@ Usage: quiren [options] [dir]
 Options:
     -h, --help      Prints help information
     -r, --retry     Re-enters the editor after an error
+    -d, --delete    Delete files removed in the editor
 ";
+
+struct Args {
+    delete: bool,
+}
 
 fn main() -> Result<(), main_error::MainError> {
     let mut pargs = pico_args::Arguments::from_env();
 
-    let help = pargs.contains(["-h", "--help"]) ;
-    let retry = pargs.contains(["-r", "--retry"]) ;
+    let help = pargs.contains(["-h", "--help"]);
+    let retry = pargs.contains(["-r", "--retry"]);
+    let delete = pargs.contains(["-d", "--delete"]);
 
     let dir: PathBuf = pargs
         .free_from_str()
@@ -33,7 +39,7 @@ fn main() -> Result<(), main_error::MainError> {
         use std::io::Read;
         let mut stdin = std::io::stdin();
 
-        while let Err(err) = quiren(&dir) {
+        while let Err(err) = quiren(&dir, Args { delete }) {
             eprintln!("Error: {}", err);
             eprintln!("Press enter to retry");
 
@@ -42,7 +48,7 @@ fn main() -> Result<(), main_error::MainError> {
         return Ok(());
     }
 
-    Ok(quiren(&dir)?)
+    Ok(quiren(&dir, Args { delete })?)
 }
 
 #[derive(Error, Debug)]
@@ -57,16 +63,16 @@ enum QuirenError {
     IoError(#[from] std::io::Error),
 }
 
-fn quiren(dir: &Path) -> Result<(), QuirenError> {
+fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
     let mut entries: Vec<_> = dir.read_dir()?.map(|e| e.unwrap()).collect();
 
     entries.sort_by_key(|e| e.file_name());
 
-    let text: OsString = entries
+    let entries_name = entries
         .iter()
         .map(|e| e.file_name())
-        .collect::<Vec<OsString>>()
-        .concat("\n");
+        .collect::<Vec<OsString>>();
+    let text = entries_name.clone().concat("\n");
 
     let text = text.to_string_lossy().into_owned();
 
@@ -75,7 +81,7 @@ fn quiren(dir: &Path) -> Result<(), QuirenError> {
     // check if linecount = entry count
     let new_count = edited.lines().count();
 
-    if new_count != entries.len() {
+    if new_count != entries.len() && !args.delete {
         return Err(QuirenError::EntryCountMismatch(entries.len(), new_count));
     }
 
@@ -94,6 +100,30 @@ fn quiren(dir: &Path) -> Result<(), QuirenError> {
                 return Err(QuirenError::DuplicateName(a.to_string()));
             }
         }
+    }
+
+    // Delete files that have been deleted in the editor and return
+    // Managing deletion AND rename is too complex. Users must perform
+    // there operations separately
+    if args.delete {
+        let r: Vec<OsString> = edited
+            .lines()
+            .map(OsString::from)
+            .collect::<Vec<OsString>>();
+        if args.delete {
+            let to_delete: Vec<_> = entries_name
+                .iter()
+                .filter(|existed| !r.contains(existed))
+                .collect();
+
+            for d in to_delete {
+                let mut new_path = dir.to_owned();
+                new_path.push(d);
+                fs::remove_file(new_path).unwrap();
+            }
+        }
+
+        return Ok(());
     }
 
     for (i, line) in edited
