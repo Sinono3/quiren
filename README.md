@@ -2,6 +2,8 @@
 
 Edits the filenames of the current directory on the editor of your choice.
 
+![Demo](demo.gif)
+
 ## Installation
 
 From crates.io:
