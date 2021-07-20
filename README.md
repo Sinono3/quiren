@@ -2,7 +2,7 @@
 
 Edits the filenames of the current directory on the editor of your choice.
 
-![Demo](demo.gif)
+<img src="demo.gif" width="400">
 
 ## Installation
 
