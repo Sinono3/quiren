@@ -26,6 +26,7 @@ Options:
     -h, --help      Prints help information
     -r, --retry     Re-enters the editor after an error
     -d, --delete    Delete files removed in the editor
+    -n, --dry-run   Show changes and ask for confirmation
 ```
 
 Examples:
