@@ -1,4 +1,5 @@
 use osstrtools::OsStrConcat;
+use question::{Answer, Question};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -12,10 +13,12 @@ Options:
     -h, --help      Prints help information
     -r, --retry     Re-enters the editor after an error
     -d, --delete    Delete files removed in the editor
+    -n, --dry-run   Show changes and ask for confirmation
 ";
 
 struct Args {
     delete: bool,
+    dryrun: bool,
 }
 
 fn main() -> Result<(), main_error::MainError> {
@@ -24,6 +27,7 @@ fn main() -> Result<(), main_error::MainError> {
     let help = pargs.contains(["-h", "--help"]);
     let retry = pargs.contains(["-r", "--retry"]);
     let delete = pargs.contains(["-d", "--delete"]);
+    let dryrun = pargs.contains(["-n", "--dry-run"]);
 
     let dir: PathBuf = pargs
         .free_from_str()
@@ -39,7 +43,7 @@ fn main() -> Result<(), main_error::MainError> {
         use std::io::Read;
         let mut stdin = std::io::stdin();
 
-        while let Err(err) = quiren(&dir, Args { delete }) {
+        while let Err(err) = quiren(&dir, Args { delete, dryrun }) {
             eprintln!("Error: {}", err);
             eprintln!("Press enter to retry");
 
@@ -48,7 +52,7 @@ fn main() -> Result<(), main_error::MainError> {
         return Ok(());
     }
 
-    Ok(quiren(&dir, Args { delete })?)
+    Ok(quiren(&dir, Args { delete, dryrun })?)
 }
 
 #[derive(Error, Debug)]
@@ -76,7 +80,7 @@ fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
 
     let text = text.to_string_lossy().into_owned();
 
-    let edited = edit::edit(&text)?;
+    let mut edited = edit::edit(&text)?;
 
     // check if linecount = entry count
     let new_count = edited.lines().count();
@@ -124,6 +128,37 @@ fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
         }
 
         return Ok(());
+    }
+
+    if args.dryrun {
+        loop {
+            for (i, line) in edited
+                .lines()
+                .enumerate()
+                // Only rename files with modified names
+                .filter(|(i, line)| {
+                    let name = OsStr::new(line);
+                    name != entries[*i].file_name()
+                })
+            {
+                let mut new_path = dir.to_owned();
+                new_path.push(line);
+                println!(
+                    "{} -> {}",
+                    &entries[i].path().to_str().unwrap(),
+                    new_path.to_str().unwrap(),
+                );
+            }
+            let answer = Question::new("Confirm ?")
+                .default(Answer::YES)
+                .show_defaults()
+                .confirm();
+            if answer == Answer::NO {
+                edited = edit::edit(&edited)?;
+            } else {
+                break;
+            }
+        }
     }
 
     for (i, line) in edited
