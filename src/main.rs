@@ -2,7 +2,7 @@ use osstrtools::OsStrConcat;
 use question::{Answer, Question};
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs;
+use std::fs::{self, DirEntry};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -72,20 +72,72 @@ fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
 
     entries.sort_by_key(|e| e.file_name());
 
-    let entries_name = entries
+    let text = entries
         .iter()
         .map(|e| e.file_name())
-        .collect::<Vec<OsString>>();
-    let text = entries_name.clone().concat("\n");
-
-    let text = text.to_string_lossy().into_owned();
+        .concat("\n")
+        .to_string_lossy()
+        .into_owned();
 
     let mut edited = edit::edit(&text)?;
+    let mut changes = Vec::new();
 
-    // check if linecount = entry count
+    if args.delete {
+        // We add the changes to the vec.
+        // Notice the try operator (?). We do the checks inside the
+        // extraction functions.
+        changes.extend(extract_deletions(&edited, &entries)?);
+    } else {
+        // The default behaviour is to rename files.
+        // So if the delete flag isn't set, then we do that.
+        changes.extend(extract_renames(&edited, &dir, &entries)?);
+    }
+
+    if args.dryrun {
+        loop {
+            if confirm_changes(&changes) {
+                break;
+            }
+
+            edited = edit::edit(&edited)?;
+            changes.clear();
+
+            if args.delete {
+                changes.extend(extract_deletions(&edited, &entries)?);
+            } else {
+                changes.extend(extract_renames(&edited, &dir, &entries)?);
+            }
+        }
+    }
+
+    // Perform the filesystem operations.
+    for change in changes {
+        match change {
+            Change::Rename(a, b) => fs::rename(a, b)?,
+            Change::Delete(a) => fs::remove_file(a)?,
+        }
+    }
+
+    Ok(())
+}
+
+enum Change {
+    // Rename: file_a -> file_b
+    Rename(PathBuf, PathBuf),
+    // Delete: file_a
+    Delete(PathBuf),
+}
+
+/// Returns an iterator with all the renames found.
+fn extract_renames<'a>(
+    edited: &'a str,
+    dir: &'a Path,
+    entries: &'a Vec<DirEntry>,
+) -> Result<impl Iterator<Item = Change> + 'a, QuirenError> {
+    // Check if linecount = entry count
     let new_count = edited.lines().count();
 
-    if new_count != entries.len() && !args.delete {
+    if new_count != entries.len() {
         return Err(QuirenError::EntryCountMismatch(entries.len(), new_count));
     }
 
@@ -106,74 +158,62 @@ fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
         }
     }
 
-    // Delete files that have been deleted in the editor and return
-    // Managing deletion AND rename is too complex. Users must perform
-    // there operations separately
-    if args.delete {
-        let r: Vec<OsString> = edited
-            .lines()
-            .map(OsString::from)
-            .collect::<Vec<OsString>>();
-        if args.delete {
-            let to_delete: Vec<_> = entries_name
-                .iter()
-                .filter(|existed| !r.contains(existed))
-                .collect();
-
-            for d in to_delete {
-                let mut new_path = dir.to_owned();
-                new_path.push(d);
-                fs::remove_file(new_path).unwrap();
-            }
-        }
-
-        return Ok(());
-    }
-
-    if args.dryrun {
-        loop {
-            for (i, line) in edited
-                .lines()
-                .enumerate()
-                // Only rename files with modified names
-                .filter(|(i, line)| {
-                    let name = OsStr::new(line);
-                    name != entries[*i].file_name()
-                })
-            {
-                let mut new_path = dir.to_owned();
-                new_path.push(line);
-                println!(
-                    "{} -> {}",
-                    &entries[i].path().to_str().unwrap(),
-                    new_path.to_str().unwrap(),
-                );
-            }
-            let answer = Question::new("Confirm ?")
-                .default(Answer::YES)
-                .show_defaults()
-                .confirm();
-            if answer == Answer::NO {
-                edited = edit::edit(&edited)?;
-            } else {
-                break;
-            }
-        }
-    }
-
-    for (i, line) in edited
+    let iter = edited
         .lines()
         .enumerate()
         // Only rename files with modified names
-        .filter(|(i, line)| {
+        .filter(move |(i, line)| {
             let name = OsStr::new(line);
             name != entries[*i].file_name()
         })
-    {
-        let mut new_path = dir.to_owned();
-        new_path.push(line);
-        fs::rename(&entries[i].path(), new_path)?;
+        .map(move |(i, line)| {
+            let mut new_path = dir.to_owned();
+            new_path.push(line);
+            Change::Rename(entries[i].path(), new_path)
+        });
+
+    Ok(iter)
+}
+
+/// Returns an iterator with all the deletions found.
+fn extract_deletions<'a>(
+    edited: &'a str,
+    entries: &'a Vec<DirEntry>,
+) -> Result<impl Iterator<Item = Change> + 'a, QuirenError> {
+    // Delete files that have been deleted in the editor and return
+    // Managing deletion AND rename is too complex. Users must perform
+    // there operations separately
+
+    let r: Vec<OsString> = edited
+        .lines()
+        .map(OsString::from)
+        .collect::<Vec<OsString>>();
+
+    let iter = entries
+        .iter()
+        .filter(move |existed| !r.contains(&existed.file_name()))
+        .map(move |entry| Change::Delete(entry.path()));
+
+    Ok(iter)
+}
+
+fn confirm_changes(changes: &[Change]) -> bool {
+    for change in changes {
+        match change {
+            Change::Rename(a, b) => println!("Rename: {} -> {}", a.display(), b.display()),
+            Change::Delete(a) => println!("Delete: {}", a.display()),
+        }
     }
 
-    Ok(())
+    if changes.is_empty() {
+        println!("No changes.");
+        return true;
+    }
+
+    let answer = Question::new("Confirm ?")
+        .default(Answer::YES)
+        .show_defaults()
+        .confirm();
+
+    answer == Answer::YES
 }
