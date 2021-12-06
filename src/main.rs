@@ -1,10 +1,14 @@
 use osstrtools::OsStrConcat;
 use question::{Answer, Question};
+use std::collections::HashMap;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, DirEntry};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+mod util;
+use util::tmpfile;
 
 const HELP: &str = "\
 Usage: quiren [options] [dir]
@@ -16,7 +20,7 @@ Options:
     -n, --dry-run   Show changes and ask for confirmation
 ";
 
-struct Args {
+pub struct Args {
     delete: bool,
     dryrun: bool,
 }
@@ -56,18 +60,22 @@ fn main() -> Result<(), main_error::MainError> {
 }
 
 #[derive(Error, Debug)]
-enum QuirenError {
+pub enum QuirenError {
     #[error("the entry '{0}' was assigned an empty name")]
     EmptyName(String),
     #[error("the filename {0} is duplicated")]
     DuplicateName(String),
     #[error("lines cannot be deleted or added: {0} -> {1}")]
     EntryCountMismatch(usize, usize),
-    #[error("I/O error {0}")]
+    #[error("the filename {1} will be overwritten by {0}")]
+    Overwrite(PathBuf, PathBuf),
+    #[error("Couldn't allocate auxiliary tempfile")]
+    Tempfile,
+    #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 }
 
-fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
+pub fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
     let mut entries: Vec<_> = dir.read_dir()?.map(|e| e.unwrap()).collect();
 
     entries.sort_by_key(|e| e.file_name());
@@ -110,10 +118,45 @@ fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
         }
     }
 
+    // Files that have been moved to a tempfile
+    let mut moved_to_tempfile: HashMap<&Path, PathBuf> = HashMap::new();
+
     // Perform the filesystem operations.
-    for change in changes {
+    for change in changes.iter() {
         match change {
-            Change::Rename(a, b) => fs::rename(a, b)?,
+            Change::Rename(a, b) => {
+                // Check if a file already exists at the new name
+                if b.exists() {
+                    // Check if `b` will also be renamed or deleted
+                    let b_in_changes = changes
+                        .iter()
+                        .find(|c| match c {
+                            Change::Rename(x, _) => x == b,
+                            Change::Delete(x) => x == b,
+                        })
+                        .is_some();
+
+                    // If not, then we cannot perform the renames
+                    // without `a` overwriting `b`
+                    if !b_in_changes {
+                        return Err(QuirenError::Overwrite(a.to_path_buf(), b.to_path_buf()));
+                    }
+
+                    let aux = tmpfile(b.parent().unwrap())?;
+                    fs::rename(b, &aux)?;
+                    moved_to_tempfile.insert(b, aux);
+                }
+
+                // Check if `a` was moved to an auxiliary tempfile
+                let a = if let Some(temp) = moved_to_tempfile.get(a.as_path()) {
+                    temp
+                } else {
+                    &a
+                };
+
+                dbg!(&a);
+                fs::rename(a, b)?
+            }
             Change::Delete(a) => fs::remove_file(a)?,
         }
     }

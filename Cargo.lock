@@ -107,6 +107,7 @@ dependencies = [
  "osstrtools",
  "pico-args",
  "question",
+ "rand",
  "thiserror",
 ]
 
