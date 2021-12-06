@@ -21,6 +21,7 @@ Options:
     -h, --help          Prints help information
     -r, --retry         Re-enters the editor after an error
     -n, --dry-run       Show changes and ask for confirmation
+    -t, --trash         Trash files instead of deleting them
 ";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,6 +34,7 @@ pub enum Mode {
 pub struct Args {
     mode: Mode,
     dryrun: bool,
+    trash: bool,
 }
 
 fn main() -> Result<(), main_error::MainError> {
@@ -41,6 +43,7 @@ fn main() -> Result<(), main_error::MainError> {
     let help = pargs.contains(["-h", "--help"]);
     let retry = pargs.contains(["-r", "--retry"]);
     let dryrun = pargs.contains(["-n", "--dry-run"]);
+    let trash = pargs.contains(["-t", "--trash"]);
 
     let delete_mode = pargs.contains(["-d", "--delete-mode"]);
 
@@ -65,7 +68,7 @@ fn main() -> Result<(), main_error::MainError> {
         use std::io::Read;
         let mut stdin = std::io::stdin();
 
-        while let Err(err) = quiren(&dir, Args { mode, dryrun }) {
+        while let Err(err) = quiren(&dir, Args { mode, dryrun, trash }) {
             eprintln!("Error: {}", err);
             eprintln!("Press enter to retry");
 
@@ -74,7 +77,7 @@ fn main() -> Result<(), main_error::MainError> {
         return Ok(());
     }
 
-    Ok(quiren(&dir, Args { mode, dryrun })?)
+    Ok(quiren(&dir, Args { mode, dryrun, trash })?)
 }
 
 #[derive(Error, Debug)]
@@ -91,6 +94,8 @@ pub enum QuirenError {
     Tempfile,
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("error when trashing: {0}")]
+    TrashError(#[from] trash::Error),
 }
 
 pub fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
@@ -116,7 +121,7 @@ pub fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
 
     if args.dryrun {
         loop {
-            if confirm_changes(&changes) {
+            if confirm_changes(&changes, args.trash) {
                 break;
             }
 
@@ -168,6 +173,7 @@ pub fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
 
                 fs::rename(a, b)?
             }
+            Change::Delete(a) if args.trash => trash::delete(a)?,
             Change::Delete(a) => fs::remove_file(a)?,
         }
     }
@@ -251,13 +257,17 @@ fn extract_deletions<'a>(
     Ok(iter)
 }
 
-fn confirm_changes(changes: &[Change]) -> bool {
+
+fn confirm_changes(changes: &[Change], trash: bool) -> bool {
+    let delete_action = if trash { "Trash" } else { "Delete" };
+
     for change in changes {
         match change {
             Change::Rename(a, b) => println!("Rename: {} -> {}", a.display(), b.display()),
-            Change::Delete(a) => println!("Delete: {}", a.display()),
+            Change::Delete(a) => println!("{}: {}", delete_action, a.display()),
         }
     }
+
 
     if changes.is_empty() {
         println!("No changes.");
