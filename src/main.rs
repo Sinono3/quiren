@@ -13,15 +13,25 @@ use util::tmpfile;
 const HELP: &str = "\
 Usage: quiren [options] [dir]
 
+Modes:
+    <default>           Rename mode: Rename files modified in the editor
+    -d, --delete-mode   Delete mode: Delete files removed in the editor
+
 Options:
-    -h, --help      Prints help information
-    -r, --retry     Re-enters the editor after an error
-    -d, --delete    Delete files removed in the editor
-    -n, --dry-run   Show changes and ask for confirmation
+    -h, --help          Prints help information
+    -r, --retry         Re-enters the editor after an error
+    -n, --dry-run       Show changes and ask for confirmation
 ";
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Rename,
+    Delete
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Args {
-    delete: bool,
+    mode: Mode,
     dryrun: bool,
 }
 
@@ -30,8 +40,16 @@ fn main() -> Result<(), main_error::MainError> {
 
     let help = pargs.contains(["-h", "--help"]);
     let retry = pargs.contains(["-r", "--retry"]);
-    let delete = pargs.contains(["-d", "--delete"]);
     let dryrun = pargs.contains(["-n", "--dry-run"]);
+
+    let delete_mode = pargs.contains(["-d", "--delete-mode"]);
+
+    let mode = if delete_mode {
+        Mode::Delete
+    } else {
+        // The default behaviour is to rename files.
+        Mode::Rename
+    };
 
     let dir: PathBuf = pargs
         .free_from_str()
@@ -47,7 +65,7 @@ fn main() -> Result<(), main_error::MainError> {
         use std::io::Read;
         let mut stdin = std::io::stdin();
 
-        while let Err(err) = quiren(&dir, Args { delete, dryrun }) {
+        while let Err(err) = quiren(&dir, Args { mode, dryrun }) {
             eprintln!("Error: {}", err);
             eprintln!("Press enter to retry");
 
@@ -56,7 +74,7 @@ fn main() -> Result<(), main_error::MainError> {
         return Ok(());
     }
 
-    Ok(quiren(&dir, Args { delete, dryrun })?)
+    Ok(quiren(&dir, Args { mode, dryrun })?)
 }
 
 #[derive(Error, Debug)]
@@ -90,15 +108,10 @@ pub fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
     let mut edited = edit::edit(&text)?;
     let mut changes = Vec::new();
 
-    if args.delete {
-        // We add the changes to the vec.
-        // Notice the try operator (?). We do the checks inside the
-        // extraction functions.
-        changes.extend(extract_deletions(&edited, &entries)?);
-    } else {
-        // The default behaviour is to rename files.
-        // So if the delete flag isn't set, then we do that.
-        changes.extend(extract_renames(&edited, &dir, &entries)?);
+    // We add the changes
+    match args.mode {
+        Mode::Rename => changes.extend(extract_renames(&edited, &dir, &entries)?),
+        Mode::Delete => changes.extend(extract_deletions(&edited, &entries)?),
     }
 
     if args.dryrun {
@@ -110,10 +123,9 @@ pub fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
             edited = edit::edit(&edited)?;
             changes.clear();
 
-            if args.delete {
-                changes.extend(extract_deletions(&edited, &entries)?);
-            } else {
-                changes.extend(extract_renames(&edited, &dir, &entries)?);
+            match args.mode {
+                Mode::Rename => changes.extend(extract_renames(&edited, &dir, &entries)?),
+                Mode::Delete => changes.extend(extract_deletions(&edited, &entries)?),
             }
         }
     }
