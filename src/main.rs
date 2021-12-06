@@ -166,7 +166,6 @@ pub fn quiren(dir: &Path, args: Args) -> Result<(), QuirenError> {
                     &a
                 };
 
-                dbg!(&a);
                 fs::rename(a, b)?
             }
             Change::Delete(a) => fs::remove_file(a)?,
